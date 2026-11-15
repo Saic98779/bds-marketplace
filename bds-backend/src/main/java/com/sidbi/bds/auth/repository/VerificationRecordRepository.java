@@ -1,0 +1,11 @@
+package com.sidbi.bds.auth.repository;
+
+import com.sidbi.bds.auth.domain.VerificationRecord;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+
+public interface VerificationRecordRepository extends JpaRepository<VerificationRecord, Long> {
+
+    List<VerificationRecord> findByUserIdOrderByCreatedAtDesc(Long userId);
+}

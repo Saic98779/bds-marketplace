@@ -1,0 +1,23 @@
+package com.sidbi.bds.auth.repository;
+
+import com.sidbi.bds.auth.domain.RefreshToken;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.time.LocalDateTime;
+import java.util.Optional;
+
+public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
+
+    Optional<RefreshToken> findByTokenHash(String tokenHash);
+
+    @Modifying
+    @Query("update RefreshToken r set r.revoked = true where r.userId = :userId and r.revoked = false")
+    void revokeAllForUser(@Param("userId") Long userId);
+
+    @Modifying
+    @Query("delete from RefreshToken r where r.expiresAt < :before")
+    void purgeExpired(@Param("before") LocalDateTime before);
+}

@@ -1,0 +1,109 @@
+server:
+  port: ${PORT:8080}
+  error:
+    include-message: never
+    include-stacktrace: never
+
+spring:
+  application:
+    name: bds-backend
+  datasource:
+    url: ${DB_URL:jdbc:oracle:thin:@//localhost:1521/FREEPDB1}
+    username: ${DB_USERNAME:bds}
+    password: ${DB_PASSWORD:Bds#2026}
+    driver-class-name: ${DB_DRIVER:oracle.jdbc.OracleDriver}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:20}
+      minimum-idle: 2
+      connection-timeout: 20000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: Asia/Kolkata
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 30MB
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:true}
+          starttls:
+            enable: ${MAIL_STARTTLS:true}
+          connectiontimeout: 5000
+          timeout: 5000
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: Asia/Kolkata
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+  health:
+    mail:
+      enabled: false
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+bds:
+  web:
+    allowed-origins: ${BDS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000,http://localhost}
+    auth-requests-per-minute: ${BDS_AUTH_RATE:60}
+    api-requests-per-minute: ${BDS_API_RATE:1200}
+  security:
+    jwt-secret: ${BDS_JWT_SECRET:change-this-jwt-secret-in-production-0123456789abcdef}
+    access-token-minutes: ${BDS_ACCESS_TOKEN_MINUTES:30}
+    refresh-token-days: ${BDS_REFRESH_TOKEN_DAYS:7}
+  crypto:
+    data-key: ${BDS_DATA_KEY:change-this-data-encryption-key-0123456789abcdef}
+    hash-key: ${BDS_HASH_KEY:change-this-blind-index-hash-key-0123456789abcdef}
+  storage:
+    root: ${BDS_STORAGE_ROOT:./data}
+  mail:
+    enabled: ${BDS_MAIL_ENABLED:false}
+    from: ${BDS_MAIL_FROM:no-reply@bdsmarketplace.in}
+  auth:
+    login-otp-enabled: ${BDS_LOGIN_OTP:true}
+    registration-otp-required: ${BDS_REGISTRATION_OTP:true}
+    expose-otp-in-response: ${BDS_EXPOSE_OTP:true}
+    otp-expiry-minutes: 5
+    max-login-attempts: 5
+    lock-minutes: 15
+    buyer-auto-approve: ${BDS_BUYER_AUTO_APPROVE:false}
+    reverification-months: 12
+    require-encrypted-password: ${BDS_REQUIRE_ENCRYPTED_PASSWORD:false}
+    transport-private-key: ${BDS_TRANSPORT_PRIVATE_KEY:}
+    transport-public-key: ${BDS_TRANSPORT_PUBLIC_KEY:}
+    bootstrap:
+      admin-email: ${BDS_ADMIN_EMAIL:admin@bdsmarketplace.in}
+      admin-password: ${BDS_ADMIN_PASSWORD:Admin@12345}
+      admin-name: Platform Administrator
+      demo-users: ${BDS_DEMO_USERS:true}
+      demo-password: ${BDS_DEMO_PASSWORD:Demo@12345}
+  catalog:
+    demo-listings: ${BDS_DEMO_USERS:true}
+  procurement:
+    reminder-hours: 24
+    expiry-days-after-deadline: 60
+    scheduler-interval-ms: ${BDS_SCHEDULER_INTERVAL_MS:300000}

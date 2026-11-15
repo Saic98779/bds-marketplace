@@ -1,0 +1,14 @@
+# Build output
+target/
+
+# Runtime file storage (uploaded documents)
+data/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
