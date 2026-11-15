@@ -1,5 +1,5 @@
 // Builds the bds-backend Docker image and (re)deploys the container on the same VM Jenkins runs on.
-// One-time prerequisites on the server (see deploy/README.md):
+// One-time prerequisites on the server (see DEPLOYMENT.md):
 //   - sudo bash deploy/setup-server.sh   (Oracle container on the bds-net network, generated secrets)
 //   - Jenkins "Secret file" credential 'bds-env-file' holding DB_PASSWORD, BDS_JWT_SECRET, ...
 
