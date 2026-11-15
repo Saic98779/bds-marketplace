@@ -20,10 +20,16 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 echo "==> Packages"
 # A broken third-party repo must not block installing packages from the Ubuntu archive.
 apt-get update -qq || echo "    warning: apt-get update reported errors; continuing with available indexes"
-# Other services on this host use the default java; keep whatever it points at today.
-SELECTIONS=$(update-alternatives --get-selections)
+# Other services on this host use the default java; keep it on the JDK it uses today.
+DEFAULT_JDK=$(dirname "$(dirname "$(readlink -f /usr/bin/java 2>/dev/null || true)")")
 apt-get install -y -qq ca-certificates curl openssl openjdk-21-jdk-headless maven >/dev/null
-echo "$SELECTIONS" | update-alternatives --set-selections
+if [ -n "$DEFAULT_JDK" ]; then
+    # Auto mode would switch every tool to the newly installed JDK 21; pin each back explicitly.
+    for name in $(update-alternatives --get-selections | awk '{print $1}'); do
+        alt=$(update-alternatives --list "$name" 2>/dev/null | grep "^$DEFAULT_JDK/" | head -1 || true)
+        [ -n "$alt" ] && update-alternatives --set "$name" "$alt" >/dev/null
+    done
+fi
 echo "    default java: $(readlink -f /usr/bin/java)"
 if ! command -v docker >/dev/null; then
     curl -fsSL https://get.docker.com | sh
