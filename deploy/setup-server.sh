@@ -18,7 +18,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 [ "$(id -u)" -eq 0 ] || { echo "Run with sudo"; exit 1; }
 
 echo "==> Packages"
-apt-get update -qq
+# A broken third-party repo must not block installing packages from the Ubuntu archive.
+apt-get update -qq || echo "    warning: apt-get update reported errors; continuing with available indexes"
 # Other services on this host use the default java; keep whatever it points at today.
 SELECTIONS=$(update-alternatives --get-selections)
 apt-get install -y -qq ca-certificates curl openssl openjdk-21-jdk-headless maven >/dev/null
