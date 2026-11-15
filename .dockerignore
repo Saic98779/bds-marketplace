@@ -1,0 +1,12 @@
+**/target/
+**/data/
+.git/
+.idea/
+*.iml
+.env
+Dockerfile
+Jenkinsfile
+*.md
+api-tests/
+bds-frontend/
+deploy/

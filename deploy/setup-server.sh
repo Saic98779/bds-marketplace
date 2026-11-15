@@ -1,58 +1,39 @@
 #!/usr/bin/env bash
-# One-time (idempotent) server setup for bds-backend on Ubuntu.
-#   - Docker + Oracle Database 23ai Free (gvenzl/oracle-free) on 127.0.0.1:1521
-#   - Java 21 + Maven for Jenkins builds (installed side by side; the system default java is left unchanged)
-#   - /opt/bds layout, systemd service, generated secrets in /etc/bds/bds-backend.env
-#   - sudo rule letting the jenkins user run only the deploy script
+# One-time (idempotent) server setup for the bds-backend container on Ubuntu.
+#   - Docker
+#   - Oracle Database 23ai Free (gvenzl/oracle-free) on the private 'bds-net' network (host access: 127.0.0.1:1521)
+#   - generated secrets in /etc/bds/bds-backend.env and the container env file for Jenkins in /etc/bds/bds-backend.container.env
 #
-# Usage: sudo bash setup-server.sh [backend_port]
+# Usage: sudo bash setup-server.sh
 set -euo pipefail
 
-PORT="${1:-8090}"
-APP_USER=bds
-APP_HOME=/opt/bds
 ENV_FILE=/etc/bds/bds-backend.env
+CONTAINER_ENV_FILE=/etc/bds/bds-backend.container.env
 ORACLE_CONTAINER=bds-oracle
-HERE="$(cd "$(dirname "$0")" && pwd)"
+NETWORK=bds-net
 
 [ "$(id -u)" -eq 0 ] || { echo "Run with sudo"; exit 1; }
 
-echo "==> Packages"
-# A broken third-party repo must not block installing packages from the Ubuntu archive.
-apt-get update -qq || echo "    warning: apt-get update reported errors; continuing with available indexes"
-# Other services on this host use the default java; keep it on the JDK it uses today.
-DEFAULT_JDK=$(dirname "$(dirname "$(readlink -f /usr/bin/java 2>/dev/null || true)")")
-apt-get install -y -qq ca-certificates curl openssl openjdk-21-jdk-headless maven >/dev/null
-if [ -n "$DEFAULT_JDK" ]; then
-    # Auto mode would switch every tool to the newly installed JDK 21; pin each back explicitly.
-    for name in $(update-alternatives --get-selections | awk '{print $1}'); do
-        alt=$(update-alternatives --list "$name" 2>/dev/null | grep "^$DEFAULT_JDK/" | head -1 || true)
-        [ -n "$alt" ] && update-alternatives --set "$name" "$alt" >/dev/null
-    done
-fi
-echo "    default java: $(readlink -f /usr/bin/java)"
+echo "==> Docker"
 if ! command -v docker >/dev/null; then
     curl -fsSL https://get.docker.com | sh
 fi
 systemctl enable --now docker
+docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK" >/dev/null
 
 echo "==> Secrets"
 mkdir -p /etc/bds
 if [ ! -f "$ENV_FILE" ]; then
     gen() { openssl rand -base64 48 | tr -d '\n/+=' | cut -c1-48; }
-    DB_PASSWORD="Bds$(openssl rand -hex 8)#1"
     ADMIN_PASSWORD="Adm$(openssl rand -hex 6)@1"
     cat > "$ENV_FILE" <<EOF
-PORT=$PORT
-DB_URL=jdbc:oracle:thin:@//127.0.0.1:1521/FREEPDB1
 DB_USERNAME=bds
-DB_PASSWORD=$DB_PASSWORD
+DB_PASSWORD=Bds$(openssl rand -hex 8)#1
 ORACLE_SYS_PASSWORD=Sys$(openssl rand -hex 8)#1
 BDS_JWT_SECRET=$(gen)
 BDS_DATA_KEY=$(gen)
 BDS_HASH_KEY=$(gen)
 BDS_ADMIN_PASSWORD=$ADMIN_PASSWORD
-BDS_STORAGE_ROOT=$APP_HOME/data
 BDS_EXPOSE_OTP=true
 BDS_ALLOWED_ORIGINS=http://localhost:5173
 EOF
@@ -62,37 +43,29 @@ fi
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
 
+# What the application container needs: everything except the Oracle SYS password, plus the in-network DB URL.
+{
+    echo "DB_URL=jdbc:oracle:thin:@//$ORACLE_CONTAINER:1521/FREEPDB1"
+    grep -vE '^(ORACLE_SYS_PASSWORD|DB_URL|PORT|BDS_STORAGE_ROOT)=' "$ENV_FILE"
+} > "$CONTAINER_ENV_FILE"
+chmod 600 "$CONTAINER_ENV_FILE"
+echo "    container env file: $CONTAINER_ENV_FILE (upload it as Jenkins secret file 'bds-env-file')"
+
 echo "==> Oracle Database Free"
 if ! docker ps -a --format '{{.Names}}' | grep -qx "$ORACLE_CONTAINER"; then
     docker run -d --name "$ORACLE_CONTAINER" --restart unless-stopped \
+        --network "$NETWORK" \
         -p 127.0.0.1:1521:1521 \
         -e ORACLE_PASSWORD="$ORACLE_SYS_PASSWORD" \
         -e APP_USER="$DB_USERNAME" -e APP_USER_PASSWORD="$DB_PASSWORD" \
         -v bds-oracle-data:/opt/oracle/oradata \
         gvenzl/oracle-free:slim-faststart
 fi
+docker network connect "$NETWORK" "$ORACLE_CONTAINER" 2>/dev/null || true
 echo -n "    waiting for database"
 for _ in $(seq 1 90); do
     if docker logs "$ORACLE_CONTAINER" 2>&1 | grep -q "DATABASE IS READY TO USE"; then echo " ready"; break; fi
     echo -n "."; sleep 5
 done
 
-echo "==> Application layout"
-id "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$APP_HOME" --shell /usr/sbin/nologin "$APP_USER"
-mkdir -p "$APP_HOME/data" "$APP_HOME/releases" "$APP_HOME/bin"
-chown -R "$APP_USER:$APP_USER" "$APP_HOME/data"
-install -m 755 -o root -g root "$HERE/deploy.sh" "$APP_HOME/bin/deploy.sh"
-install -m 644 -o root -g root "$HERE/bds-backend.service" /etc/systemd/system/bds-backend.service
-systemctl daemon-reload
-systemctl enable bds-backend >/dev/null
-
-echo "==> Jenkins permissions"
-if id jenkins >/dev/null 2>&1; then
-    echo "jenkins ALL=(root) NOPASSWD: $APP_HOME/bin/deploy.sh" > /etc/sudoers.d/bds-deploy
-    chmod 440 /etc/sudoers.d/bds-deploy
-    visudo -cf /etc/sudoers.d/bds-deploy >/dev/null
-else
-    echo "    no local 'jenkins' user found; add a sudo rule for the Jenkins agent user manually"
-fi
-
-echo "Done. Deploy with: sudo $APP_HOME/bin/deploy.sh <path-to-bds-backend.jar>"
+echo "Done. Jenkins job 'bds-backend' builds the Dockerfile and runs the container on 127.0.0.1:8090."
