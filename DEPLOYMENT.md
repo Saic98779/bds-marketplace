@@ -27,14 +27,14 @@ Complete steps to take a fresh Ubuntu server to a running BDS Marketplace backen
 |---|---|
 | Code | <https://github.com/Saic98779/bds-marketplace> (`main` branch) |
 | Image build | `Dockerfile`: Maven build and tests, then a non-root Java 21 runtime image |
-| Pipeline | `Jenkinsfile`, Jenkins job `bds-backend` at <https://jenkins.metaversedu.in>, checks `main` every 5 minutes |
+| Pipeline | `Jenkinsfile`, Jenkins job `bds-backend` on the Jenkins running on 51.79.165.43 (port 8080), checks `main` every 5 minutes |
 | Database | container `bds-oracle` (Oracle 23ai Free, database `FREEPDB1`, user `bds`), data in volume `bds-oracle-data`; host access on `127.0.0.1:1522` (1521 is often taken by another Oracle container) |
 | Backend | container `bds-backend` on `127.0.0.1:8090` → `8080`, uploaded files in volume `bds-backend-data` |
 | Network | both containers on the private Docker network `bds-net`; the app connects to `bds-oracle:1521` |
 | Secrets | `/etc/bds/bds-backend.env` on the server (root only); the container settings `/etc/bds/bds-backend.container.env` (readable by the `jenkins` group) |
 
 ```
-                 ┌──────────────── 51.222.155.92 ────────────────┐
+                 ┌──────────────── 51.79.165.43 ─────────────────┐
   git push ──▶   │ Jenkins (8080) ── docker build ──▶ bds-backend │
   (GitHub main)  │                                   127.0.0.1:8090│
                  │                     bds-net          │         │
@@ -139,7 +139,7 @@ Log in as `admin@bdsmarketplace.in` with that password. While `BDS_EXPOSE_OTP=tr
 
 The container only listens on `127.0.0.1`, so the recommended way in is through nginx, like the Jenkins site.
 
-1. Create a DNS **A record**, e.g. `bds-api.metaversedu.in`, pointing to `51.222.155.92`.
+1. Create a DNS **A record**, e.g. `bds-api.metaversedu.in`, pointing to `51.79.165.43`.
 2. Create `/etc/nginx/sites-available/bds-api.metaversedu.in`:
 
    ```nginx
