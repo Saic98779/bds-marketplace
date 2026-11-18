@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-time (idempotent) server setup for the bds-backend container on Ubuntu.
 #   - Docker
-#   - Oracle Database 23ai Free (gvenzl/oracle-free) on the private 'bds-net' network (host access: 127.0.0.1:1521)
+#   - Oracle Database 23ai Free (gvenzl/oracle-free) on the private 'bds-net' network
+#     (host access: 127.0.0.1:$ORACLE_HOST_PORT, default 1522 because other Oracle containers often hold 1521)
 #   - generated secrets in /etc/bds/bds-backend.env and the container env file for Jenkins in /etc/bds/bds-backend.container.env
 #
 # Usage: sudo bash setup-server.sh
@@ -11,6 +12,7 @@ ENV_FILE=/etc/bds/bds-backend.env
 CONTAINER_ENV_FILE=/etc/bds/bds-backend.container.env
 ORACLE_CONTAINER=bds-oracle
 NETWORK=bds-net
+ORACLE_HOST_PORT=${ORACLE_HOST_PORT:-1522}
 
 [ "$(id -u)" -eq 0 ] || { echo "Run with sudo"; exit 1; }
 
@@ -53,14 +55,18 @@ echo "    container env file: $CONTAINER_ENV_FILE (upload it as Jenkins secret f
 
 echo "==> Oracle Database Free"
 if ! docker ps -a --format '{{.Names}}' | grep -qx "$ORACLE_CONTAINER"; then
+    if ss -ltn "sport = :$ORACLE_HOST_PORT" | grep -q LISTEN; then
+        echo "    port $ORACLE_HOST_PORT is in use; re-run with ORACLE_HOST_PORT=<free port>"; exit 1
+    fi
     docker run -d --name "$ORACLE_CONTAINER" --restart unless-stopped \
         --network "$NETWORK" \
-        -p 127.0.0.1:1521:1521 \
+        -p 127.0.0.1:$ORACLE_HOST_PORT:1521 \
         -e ORACLE_PASSWORD="$ORACLE_SYS_PASSWORD" \
         -e APP_USER="$DB_USERNAME" -e APP_USER_PASSWORD="$DB_PASSWORD" \
         -v bds-oracle-data:/opt/oracle/oradata \
         gvenzl/oracle-free:slim-faststart
 fi
+docker start "$ORACLE_CONTAINER" >/dev/null
 docker network connect "$NETWORK" "$ORACLE_CONTAINER" 2>/dev/null || true
 echo -n "    waiting for database"
 for _ in $(seq 1 90); do
