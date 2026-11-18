@@ -66,6 +66,14 @@ git clone https://github.com/Saic98779/bds-marketplace.git /tmp/bds-setup
 sudo bash /tmp/bds-setup/deploy/setup-server.sh
 ```
 
+> **Server already runs an Oracle container** (e.g. `oracle21c`, Oracle XE)? If there isn't about 3 GB of RAM free for a second database, share it instead:
+>
+> ```bash
+> sudo EXISTING_ORACLE=oracle21c bash /tmp/bds-setup/deploy/setup-server.sh
+> ```
+>
+> This creates the `bds` user in `XEPDB1` (override with `ORACLE_SERVICE=...`), connects that container to `bds-net` and sets `DB_URL=jdbc:oracle:thin:@//oracle21c:1521/XEPDB1`. Wherever this guide says `bds-oracle` / `FREEPDB1`, read `oracle21c` / `XEPDB1`.
+
 The script is safe to re-run. It:
 
 - installs Docker if it's missing, and creates the `bds-net` network
@@ -200,6 +208,7 @@ Use the same three steps whenever you change any setting.
 | Symptom | Check / fix |
 |---|---|
 | Health check times out | `docker logs --tail 100 bds-backend`; usually the database isn't ready: `docker logs bds-oracle \| tail` |
+| `UnknownHostException: oracle21c` (shared Oracle) | the Oracle container was recreated and left `bds-net`: `docker network connect bds-net oracle21c` |
 | `ORA-12514` / connection refused | `docker network connect bds-net bds-oracle`; make sure `DB_URL` is `jdbc:oracle:thin:@//bds-oracle:1521/FREEPDB1` |
 | `permission denied ... docker.sock` in Jenkins | add `jenkins` to the `docker` group and restart Jenkins ([step 1](#1-prerequisites)) |
 | `Could not find credentials entry with ID 'bds-env-file'` | redo [step 4](#4-jenkins-credential); the ID must match exactly |
