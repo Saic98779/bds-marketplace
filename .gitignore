@@ -17,6 +17,6 @@ Thumbs.db
 application-local.yml
 
 
-# Generated API test reports (contain credentials) and Python caches
-bds-backend/api-tests/*payloads.md
+# Unmasked API test reports (contain credentials) and Python caches
+*.unredacted.md
 __pycache__/

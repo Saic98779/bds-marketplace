@@ -29,9 +29,16 @@ def short(value, limit=3500):
     return text if len(text) <= limit else text[:limit] + "\n... (truncated)"
 
 
+SECRET_KEYS = ("password", "newPassword", "currentPassword", "temporaryPassword")
+# Reports for anything but a local backend must not contain real passwords (they may be committed)
+def is_local():
+    return BASE.startswith(("http://localhost", "http://127.0.0.1"))
+
+
 def redact(obj):
     if isinstance(obj, dict):
-        return {k: (v[:20] + "...") if k in ("accessToken", "refreshToken", "challengeToken") and isinstance(v, str) else redact(v)
+        return {k: (v[:20] + "...") if k in ("accessToken", "refreshToken", "challengeToken") and isinstance(v, str)
+                else "<redacted>" if k in SECRET_KEYS and not is_local() and isinstance(v, str) else redact(v)
                 for k, v in obj.items()}
     if isinstance(obj, list):
         return [redact(v) for v in obj]
@@ -364,7 +371,9 @@ def write_report(onboarded, meta):
              "## Onboarded accounts", "", "| Account | Email | Password | userId | referenceNo |", "|---|---|---|---|---|"]
     for label, email, pwd, info in onboarded:
         info = info or {}
-        lines.append(f"| {label} | {email} | `{pwd}` | {info.get('userId', '—')} | {info.get('referenceNo', '—')} |")
+        lines.append(f"| {label} | {email} | `{pwd if is_local() else '<redacted>'}` | {info.get('userId', '—')} | {info.get('referenceNo', '—')} |")
+        if not is_local():
+            print(f"  account: {label}  {email}  {pwd}")
     lines += ["", "## Summary", "", "| # | Result | Status | Method | Path | Step |", "|---|---|---|---|---|---|"]
     for i, (name, method, path, status, ok) in enumerate(results, 1):
         lines.append(f"| {i} | {'PASS' if ok else 'FAIL'} | {status} | {method} | `{path}` | {name} |")
@@ -372,7 +381,7 @@ def write_report(onboarded, meta):
     for i, (name, method, path, body, status, parsed, ok, authed) in enumerate(log, 1):
         lines += [f"### {i}. {name}", "", f"`{method} {path}`" + ("  — `Authorization: Bearer <token>`" if authed else ""), ""]
         if body is not None:
-            lines += ["Request:", "```json", short(body), "```", ""]
+            lines += ["Request:", "```json", short(redact(body)), "```", ""]
         lines += [f"Response `{status}`:", "```json", short(redact(parsed)) if parsed is not None else "(empty)", "```", ""]
     OUT.write_text("\n".join(lines), encoding="utf-8")
     print(f"\n{passed}/{len(results)} passed. Payloads written to {OUT}")
