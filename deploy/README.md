@@ -5,4 +5,4 @@ Server-side files for running bds-backend with Docker and Jenkins. See [../DEPLO
 | File | Purpose |
 |---|---|
 | `setup-server.sh` | One-time, re-runnable server setup: Docker, the `bds-net` network, the Oracle Free container and generated secrets |
-| `bds-backend.env.example` | Variables the container expects (Jenkins secret file credential `bds-env-file`) |
+| `bds-backend.env.example` | Variables the container expects (generated on the server as `/etc/bds/bds-backend.container.env`) |

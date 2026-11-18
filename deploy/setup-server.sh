@@ -7,20 +7,16 @@
 #
 # Usage: sudo bash setup-server.sh
 #        sudo EXISTING_ORACLE=oracle21c bash setup-server.sh   # reuse a running Oracle container instead:
-#             creates the 'bds' user in its PDB (ORACLE_SERVICE, default XEPDB1) and joins it to 'bds-net'
+#             creates the 'bds' user in its PDB (ORACLE_SERVICE, default XEPDB1) and joins it to 'bds-net';
+#             the choice is saved in /etc/bds/bds-backend.env, so later re-runs don't need it
 set -euo pipefail
 
 ENV_FILE=/etc/bds/bds-backend.env
 CONTAINER_ENV_FILE=/etc/bds/bds-backend.container.env
 NETWORK=bds-net
 ORACLE_HOST_PORT=${ORACLE_HOST_PORT:-1522}
-if [ -n "${EXISTING_ORACLE:-}" ]; then
-    ORACLE_CONTAINER=$EXISTING_ORACLE
-    ORACLE_SERVICE=${ORACLE_SERVICE:-XEPDB1}
-else
-    ORACLE_CONTAINER=bds-oracle
-    ORACLE_SERVICE=FREEPDB1
-fi
+ARG_EXISTING_ORACLE=${EXISTING_ORACLE:-}
+ARG_ORACLE_SERVICE=${ORACLE_SERVICE:-}
 
 [ "$(id -u)" -eq 0 ] || { echo "Run with sudo"; exit 1; }
 
@@ -53,13 +49,36 @@ fi
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
 
+# Command-line choice of an existing Oracle wins over (and replaces) the saved one
+if [ -n "$ARG_EXISTING_ORACLE" ]; then
+    EXISTING_ORACLE=$ARG_EXISTING_ORACLE
+    ORACLE_SERVICE=${ARG_ORACLE_SERVICE:-${ORACLE_SERVICE:-XEPDB1}}
+    sed -i '/^EXISTING_ORACLE=/d; /^ORACLE_SERVICE=/d' "$ENV_FILE"
+    printf 'EXISTING_ORACLE=%s\nORACLE_SERVICE=%s\n' "$EXISTING_ORACLE" "$ORACLE_SERVICE" >> "$ENV_FILE"
+fi
+if [ -n "${EXISTING_ORACLE:-}" ]; then
+    ORACLE_CONTAINER=$EXISTING_ORACLE
+    ORACLE_SERVICE=${ORACLE_SERVICE:-XEPDB1}
+else
+    ORACLE_CONTAINER=bds-oracle
+    ORACLE_SERVICE=FREEPDB1
+fi
+
 # What the application container needs: everything except the Oracle SYS password, plus the in-network DB URL.
 {
     echo "DB_URL=jdbc:oracle:thin:@//$ORACLE_CONTAINER:1521/$ORACLE_SERVICE"
-    grep -vE '^(ORACLE_SYS_PASSWORD|DB_URL|PORT|BDS_STORAGE_ROOT)=' "$ENV_FILE"
+    grep -vE '^(ORACLE_SYS_PASSWORD|EXISTING_ORACLE|ORACLE_SERVICE|DB_URL|PORT|BDS_STORAGE_ROOT)=' "$ENV_FILE"
 } > "$CONTAINER_ENV_FILE"
 chmod 600 "$CONTAINER_ENV_FILE"
-echo "    container env file: $CONTAINER_ENV_FILE (upload it as Jenkins secret file 'bds-env-file')"
+# The Jenkins pipeline passes this file to 'docker run --env-file'; let only the jenkins group read it.
+if getent group jenkins >/dev/null; then
+    chown root:jenkins /etc/bds "$CONTAINER_ENV_FILE"
+    chmod 750 /etc/bds
+    chmod 640 "$CONTAINER_ENV_FILE"
+    echo "    container env file: $CONTAINER_ENV_FILE (readable by Jenkins)"
+else
+    echo "    container env file: $CONTAINER_ENV_FILE (install Jenkins, then re-run so it can read this file)"
+fi
 
 if [ -n "${EXISTING_ORACLE:-}" ]; then
     echo "==> Existing Oracle container '$ORACLE_CONTAINER' (PDB $ORACLE_SERVICE)"

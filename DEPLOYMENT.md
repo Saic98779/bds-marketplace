@@ -10,7 +10,7 @@ Complete steps to take a fresh Ubuntu server to a running BDS Marketplace backen
 1. [Prerequisites](#1-prerequisites)
 2. [Get the code onto the server](#2-get-the-code-onto-the-server)
 3. [One-time server setup: Oracle and secrets](#3-one-time-server-setup-oracle-and-secrets)
-4. [Jenkins credential](#4-jenkins-credential)
+4. [Jenkins access to the settings](#4-jenkins-access-to-the-settings)
 5. [Jenkins job](#5-jenkins-job)
 6. [First deployment](#6-first-deployment)
 7. [Verify](#7-verify)
@@ -31,7 +31,7 @@ Complete steps to take a fresh Ubuntu server to a running BDS Marketplace backen
 | Database | container `bds-oracle` (Oracle 23ai Free, database `FREEPDB1`, user `bds`), data in volume `bds-oracle-data`; host access on `127.0.0.1:1522` (1521 is often taken by another Oracle container) |
 | Backend | container `bds-backend` on `127.0.0.1:8090` → `8080`, uploaded files in volume `bds-backend-data` |
 | Network | both containers on the private Docker network `bds-net`; the app connects to `bds-oracle:1521` |
-| Secrets | `/etc/bds/bds-backend.env` on the server (root only), plus the Jenkins credential `bds-env-file` |
+| Secrets | `/etc/bds/bds-backend.env` on the server (root only); the container settings `/etc/bds/bds-backend.container.env` (readable by the `jenkins` group) |
 
 ```
                  ┌──────────────── 51.222.155.92 ────────────────┐
@@ -46,7 +46,7 @@ Complete steps to take a fresh Ubuntu server to a running BDS Marketplace backen
 ## 1. Prerequisites
 
 - Ubuntu server with `sudo` access, at least **4 GB free RAM** (Oracle uses about 2 GB) and 10 GB free disk.
-- Jenkins installed on the same server, with these plugins: **Pipeline**, **Git**, **Credentials**, **Plain Credentials**, **Timestamper**.
+- Jenkins installed on the same server, with these plugins: **Pipeline**, **Git**, **Timestamper**.
 - Docker, with the `jenkins` user in the `docker` group:
 
   ```bash
@@ -72,27 +72,30 @@ sudo bash /tmp/bds-setup/deploy/setup-server.sh
 > sudo EXISTING_ORACLE=oracle21c bash /tmp/bds-setup/deploy/setup-server.sh
 > ```
 >
-> This creates the `bds` user in `XEPDB1` (override with `ORACLE_SERVICE=...`), connects that container to `bds-net` and sets `DB_URL=jdbc:oracle:thin:@//oracle21c:1521/XEPDB1`. Wherever this guide says `bds-oracle` / `FREEPDB1`, read `oracle21c` / `XEPDB1`.
+> This creates the `bds` user in `XEPDB1` (override with `ORACLE_SERVICE=...`), connects that container to `bds-net` and sets `DB_URL=jdbc:oracle:thin:@//oracle21c:1521/XEPDB1`. Wherever this guide says `bds-oracle` / `FREEPDB1`, read `oracle21c` / `XEPDB1`. The choice is saved in `/etc/bds/bds-backend.env`, so later re-runs of the script don't need `EXISTING_ORACLE`.
 
 The script is safe to re-run. It:
 
 - installs Docker if it's missing, and creates the `bds-net` network
 - generates the secrets into `/etc/bds/bds-backend.env`: database password, JWT, data and hash keys, and the initial admin password
-- writes the container's settings to `/etc/bds/bds-backend.container.env`
+- writes the container's settings to `/etc/bds/bds-backend.container.env`, readable by the `jenkins` group
 - starts `bds-oracle` and waits for `DATABASE IS READY TO USE`
 
 > ⚠️ **Back up `/etc/bds/bds-backend.env` somewhere safe.** `BDS_DATA_KEY` and `BDS_HASH_KEY` encrypt fields in the database. If you lose or change them, that data can't be read again.
 
 The variables are listed in [`deploy/bds-backend.env.example`](deploy/bds-backend.env.example).
 
-## 4. Jenkins credential
+## 4. Jenkins access to the settings
 
-1. Go to Jenkins → **Manage Jenkins** → **Credentials** → **System** → **Global credentials** → **Add Credentials**.
-2. Fill in:
-   - **Kind:** Secret file
-   - **File:** upload `/etc/bds/bds-backend.container.env`
-   - **ID:** `bds-env-file` (exactly this; the `Jenkinsfile` refers to it)
-3. Click **Create**.
+Nothing to upload: the `Jenkinsfile` reads `/etc/bds/bds-backend.container.env` straight from the server. Check that Jenkins can read it:
+
+```bash
+sudo -u jenkins test -r /etc/bds/bds-backend.container.env && echo OK
+```
+
+If it isn't `OK` (e.g. Jenkins was installed after step 3), re-run `setup-server.sh`; it sets the file's group to `jenkins`.
+
+> Never put these values in `application.yml` or anywhere else in the repository.
 
 ## 5. Jenkins job
 
@@ -184,10 +187,9 @@ Ports 80 and 443 are already open in `ufw`, so 8090 doesn't need to be. Opening 
    ```
 
 2. Regenerate the container file: `sudo bash /tmp/bds-setup/deploy/setup-server.sh`
-3. In Jenkins, open the credential `bds-env-file`, click **Update**, upload the new `/etc/bds/bds-backend.container.env`, and save.
-4. Click **Build Now** on `bds-backend`.
+3. Click **Build Now** on `bds-backend`.
 
-Use the same three steps whenever you change any setting.
+Use the same two steps whenever you change any setting.
 
 ## 10. Day-to-day operations
 
@@ -211,7 +213,7 @@ Use the same three steps whenever you change any setting.
 | `UnknownHostException: oracle21c` (shared Oracle) | the Oracle container was recreated and left `bds-net`: `docker network connect bds-net oracle21c` |
 | `ORA-12514` / connection refused | `docker network connect bds-net bds-oracle`; make sure `DB_URL` is `jdbc:oracle:thin:@//bds-oracle:1521/FREEPDB1` |
 | `permission denied ... docker.sock` in Jenkins | add `jenkins` to the `docker` group and restart Jenkins ([step 1](#1-prerequisites)) |
-| `Could not find credentials entry with ID 'bds-env-file'` | redo [step 4](#4-jenkins-credential); the ID must match exactly |
+| `Cannot read /etc/bds/bds-backend.container.env` | re-run `setup-server.sh` (see [step 4](#4-jenkins-access-to-the-settings)) |
 | `port is already allocated` on 8090 | `sudo ss -ltnp 'sport = :8090'` to see what holds it |
 | Container restarts or is killed | it's capped at 1 GB (`--memory 1g`); check `free -m` and `docker stats` |
 | `apt-get update` fails on the Jenkins repo | the Jenkins apt signing key is missing; refresh it from <https://pkg.jenkins.io/debian-stable/> (`setup-server.sh` works around this) |

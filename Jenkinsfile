@@ -1,7 +1,7 @@
 // Builds the bds-backend Docker image and (re)deploys the container on the same VM Jenkins runs on.
 // One-time prerequisites on the server (see DEPLOYMENT.md):
 //   - sudo bash deploy/setup-server.sh   (Oracle container on the bds-net network, generated secrets)
-//   - Jenkins "Secret file" credential 'bds-env-file' holding DB_PASSWORD, BDS_JWT_SECRET, ...
+//   - /etc/bds/bds-backend.container.env readable by the jenkins user (DB_URL, DB_PASSWORD, BDS_JWT_SECRET, ...)
 
 def runContainer(String image) {
     return """
@@ -42,6 +42,7 @@ pipeline {
         HOST_PORT      = '8090'   // Jenkins uses 8080 and other apps 8081-8084 on this VM
         APP_PORT       = '8080'
         HEALTH_URL     = 'http://localhost:8090/actuator/health'
+        ENV_FILE       = '/etc/bds/bds-backend.container.env'   // written by deploy/setup-server.sh
     }
 
     stages {
@@ -64,6 +65,8 @@ pipeline {
         stage('Deploy') {
             steps {
                 sh '''
+                    [ -r "$ENV_FILE" ] || { echo "Cannot read $ENV_FILE; re-run deploy/setup-server.sh"; exit 1; }
+
                     # The backend reaches Oracle by container name on a private network
                     docker network inspect ${DOCKER_NETWORK} >/dev/null 2>&1 || docker network create ${DOCKER_NETWORK}
                     docker network connect ${DOCKER_NETWORK} ${DB_CONTAINER} 2>/dev/null || true
@@ -72,9 +75,7 @@ pipeline {
                     PREVIOUS_IMAGE=$(docker inspect --format '{{.Config.Image}}' ${CONTAINER_NAME} 2>/dev/null || true)
                     echo "${PREVIOUS_IMAGE}" > previous_image.txt
                 '''
-                withCredentials([file(credentialsId: 'bds-env-file', variable: 'ENV_FILE')]) {
-                    sh runContainer("${env.IMAGE_NAME}:${env.IMAGE_TAG}")
-                }
+                sh runContainer("${env.IMAGE_NAME}:${env.IMAGE_TAG}")
             }
         }
 
@@ -103,9 +104,7 @@ pipeline {
                 def previous = fileExists('previous_image.txt') ? readFile('previous_image.txt').trim() : ''
                 if (previous && previous != "${env.IMAGE_NAME}:${env.IMAGE_TAG}") {
                     echo "Rolling back to ${previous}"
-                    withCredentials([file(credentialsId: 'bds-env-file', variable: 'ENV_FILE')]) {
-                        sh runContainer(previous)
-                    }
+                    sh runContainer(previous)
                 }
             }
         }
