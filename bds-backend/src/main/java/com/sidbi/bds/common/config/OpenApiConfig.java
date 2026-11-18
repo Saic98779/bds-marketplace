@@ -1,28 +1,46 @@
+
 package com.sidbi.bds.common.config;
 
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
+import io.swagger.v3.oas.models.servers.Server;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.List;
+
 @Configuration
 public class OpenApiConfig {
 
     @Bean
-    public OpenAPI bdsOpenApi(@Value("${spring.application.name}") String applicationName) {
+    public OpenAPI bdsOpenApi(
+            @Value("${spring.application.name}") String applicationName) {
+
         return new OpenAPI()
+                .servers(List.of(
+                        new Server()
+                                .url("https://bds-api.metaversedu.in")
+                                .description("BDS Marketplace Production")
+                ))
                 .info(new Info()
                         .title("BDS Marketplace - " + applicationName)
                         .version("v1")
                         .description("Verified digital marketplace for MSME Business Development Services")
-                        .contact(new Contact().name("BDS Marketplace Support").email("support@bdsmarketplace.in")))
-                .components(new Components().addSecuritySchemes("bearerAuth",
-                        new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT")))
-                .addSecurityItem(new SecurityRequirement().addList("bearerAuth"));
+                        .contact(new Contact()
+                                .name("BDS Marketplace Support")
+                                .email("support@bdsmarketplace.in")))
+                .components(new Components()
+                        .addSecuritySchemes("bearerAuth",
+                                new SecurityScheme()
+                                        .type(SecurityScheme.Type.HTTP)
+                                        .scheme("bearer")
+                                        .bearerFormat("JWT")))
+                .addSecurityItem(
+                        new SecurityRequirement().addList("bearerAuth"));
     }
 }
