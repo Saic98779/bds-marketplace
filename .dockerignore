@@ -8,6 +8,5 @@ Dockerfile
 Jenkinsfile
 *.md
 bds-backend/api-tests/
-bds-frontend/
 bds-backend/deploy/
 **/application-local.yml
