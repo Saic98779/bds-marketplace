@@ -12,3 +12,6 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local developer overrides (server DB credentials and keys)
+application-local.yml

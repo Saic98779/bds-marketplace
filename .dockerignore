@@ -10,3 +10,4 @@ Jenkinsfile
 api-tests/
 bds-frontend/
 deploy/
+**/application-local.yml
