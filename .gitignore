@@ -15,3 +15,11 @@ Thumbs.db
 
 # Local developer overrides (server DB credentials and keys)
 application-local.yml
+
+# Frontend
+node_modules/
+dist/
+
+# Generated API test reports (contain credentials) and Python caches
+bds-backend/api-tests/*payloads.md
+__pycache__/

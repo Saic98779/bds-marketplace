@@ -1,6 +1,6 @@
 # deploy/
 
-Server-side files for running bds-backend with Docker and Jenkins. See [../DEPLOYMENT.md](../DEPLOYMENT.md) for the complete steps.
+Server-side files for running bds-backend with Docker and Jenkins. See [../DEPLOYMENT.md](../../DEPLOYMENT.md) for the complete steps.
 
 | File | Purpose |
 |---|---|

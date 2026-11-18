@@ -1,0 +1,110 @@
+// Builds the bds-frontend Docker image (Vite build served by nginx) and (re)deploys the container
+// on the same VM Jenkins runs on. nginx in the container proxies /api to the bds-backend container
+// over the bds-net network, so the browser only ever talks to one origin.
+// Jenkins job: Pipeline script from SCM, Script Path "bds-frontend/Jenkinsfile" (see DEPLOYMENT.md).
+
+def runContainer(String image) {
+    return """
+        docker rm -f ${env.CONTAINER_NAME} 2>/dev/null || true
+        docker run -d \\
+          --name ${env.CONTAINER_NAME} \\
+          --restart unless-stopped \\
+          --network ${env.DOCKER_NETWORK} \\
+          -e BDS_API_UPSTREAM=${env.API_UPSTREAM} \\
+          -p 127.0.0.1:${env.HOST_PORT}:80 \\
+          --memory 128m \\
+          --log-opt max-size=10m --log-opt max-file=3 \\
+          ${image}
+    """
+}
+
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    triggers {
+        pollSCM('H/5 * * * *')
+    }
+
+    environment {
+        IMAGE_NAME     = 'bds-frontend'
+        CONTAINER_NAME = 'bds-frontend'
+        DOCKER_NETWORK = 'bds-net'
+        HOST_PORT      = '8091'   // bds-backend uses 8090
+        API_UPSTREAM   = 'http://bds-backend:8080'
+        HEALTH_URL     = 'http://localhost:8091/healthz'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_SHORT}"
+                }
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                sh 'docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -t ${IMAGE_NAME}:latest bds-frontend'
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh '''
+                    docker network inspect ${DOCKER_NETWORK} >/dev/null 2>&1 || docker network create ${DOCKER_NETWORK}
+
+                    # Remember the image currently running so we can roll back
+                    PREVIOUS_IMAGE=$(docker inspect --format '{{.Config.Image}}' ${CONTAINER_NAME} 2>/dev/null || true)
+                    echo "${PREVIOUS_IMAGE}" > previous_image.txt
+                '''
+                sh runContainer("${env.IMAGE_NAME}:${env.IMAGE_TAG}")
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                sh '''
+                    for i in $(seq 1 12); do
+                      if curl -fs ${HEALTH_URL} >/dev/null && curl -fs http://localhost:${HOST_PORT}/ | grep -q '<div id="root">'; then
+                        echo "Frontend is serving the app"
+                        # The API check only warns: a backend outage should not block a frontend deploy
+                        curl -fs http://localhost:${HOST_PORT}/api/v1/public/settings >/dev/null \
+                          && echo "API proxy to bds-backend is working" \
+                          || echo "WARNING: /api is not reachable through the frontend; check that bds-backend is running on ${DOCKER_NETWORK}"
+                        exit 0
+                      fi
+                      echo "Waiting for frontend... ($i/12)"
+                      sleep 5
+                    done
+                    echo "Health check failed. Last logs:"
+                    docker logs --tail 100 ${CONTAINER_NAME}
+                    exit 1
+                '''
+            }
+        }
+    }
+
+    post {
+        failure {
+            script {
+                def previous = fileExists('previous_image.txt') ? readFile('previous_image.txt').trim() : ''
+                if (previous && previous != "${env.IMAGE_NAME}:${env.IMAGE_TAG}") {
+                    echo "Rolling back to ${previous}"
+                    sh runContainer(previous)
+                }
+            }
+        }
+        always {
+            sh 'docker image prune -f || true'
+        }
+    }
+}

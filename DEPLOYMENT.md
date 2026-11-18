@@ -18,6 +18,7 @@ Complete steps to take a fresh Ubuntu server to a running BDS Marketplace backen
 9. [Before real users: email and OTPs](#9-before-real-users-email-and-otps)
 10. [Day-to-day operations](#10-day-to-day-operations)
 11. [Troubleshooting](#11-troubleshooting)
+12. [Frontend (bds-frontend)](#12-frontend-bds-frontend)
 
 ---
 
@@ -30,7 +31,8 @@ Complete steps to take a fresh Ubuntu server to a running BDS Marketplace backen
 | Pipeline | `Jenkinsfile`, Jenkins job `bds-backend` on the Jenkins running on 51.79.165.43 (port 8080), checks `main` every 5 minutes |
 | Database | container `bds-oracle` (Oracle 23ai Free, database `FREEPDB1`, user `bds`), data in volume `bds-oracle-data`; host access on `127.0.0.1:1522` (1521 is often taken by another Oracle container) |
 | Backend | container `bds-backend` on `127.0.0.1:8090` → `8080`, uploaded files in volume `bds-backend-data` |
-| Network | both containers on the private Docker network `bds-net`; the app connects to `bds-oracle:1521` |
+| Frontend | container `bds-frontend` (nginx serving the React build) on `127.0.0.1:8091`, Jenkins job `bds-frontend`, public at <https://bds.metaversedu.in> ([step 12](#12-frontend-bds-frontend)) |
+| Network | all containers on the private Docker network `bds-net`; the backend connects to `bds-oracle:1521`, the frontend proxies `/api` to `bds-backend:8080` |
 | Secrets | `/etc/bds/bds-backend.env` on the server (root only); the container settings `/etc/bds/bds-backend.container.env` (readable by the `jenkins` group) |
 
 ```
@@ -63,13 +65,13 @@ git clone https://github.com/Saic98779/bds-marketplace.git /tmp/bds-setup
 ## 3. One-time server setup: Oracle and secrets
 
 ```bash
-sudo bash /tmp/bds-setup/deploy/setup-server.sh
+sudo bash /tmp/bds-setup/bds-backend/deploy/setup-server.sh
 ```
 
 > **Server already runs an Oracle container** (e.g. `oracle21c`, Oracle XE)? If there isn't about 3 GB of RAM free for a second database, share it instead:
 >
 > ```bash
-> sudo EXISTING_ORACLE=oracle21c bash /tmp/bds-setup/deploy/setup-server.sh
+> sudo EXISTING_ORACLE=oracle21c bash /tmp/bds-setup/bds-backend/deploy/setup-server.sh
 > ```
 >
 > This creates the `bds` user in `XEPDB1` (override with `ORACLE_SERVICE=...`), connects that container to `bds-net` and sets `DB_URL=jdbc:oracle:thin:@//oracle21c:1521/XEPDB1`. Wherever this guide says `bds-oracle` / `FREEPDB1`, read `oracle21c` / `XEPDB1`. The choice is saved in `/etc/bds/bds-backend.env`, so later re-runs of the script don't need `EXISTING_ORACLE`.
@@ -83,7 +85,7 @@ The script is safe to re-run. It:
 
 > ⚠️ **Back up `/etc/bds/bds-backend.env` somewhere safe.** `BDS_DATA_KEY` and `BDS_HASH_KEY` encrypt fields in the database. If you lose or change them, that data can't be read again.
 
-The variables are listed in [`deploy/bds-backend.env.example`](deploy/bds-backend.env.example).
+The variables are listed in [`bds-backend/deploy/bds-backend.env.example`](bds-backend/deploy/bds-backend.env.example).
 
 ## 4. Jenkins access to the settings
 
@@ -186,7 +188,7 @@ Ports 80 and 443 are already open in `ufw`, so 8090 doesn't need to be. Opening 
    BDS_ALLOWED_ORIGINS=https://your-frontend-domain
    ```
 
-2. Regenerate the container file: `sudo bash /tmp/bds-setup/deploy/setup-server.sh`
+2. Regenerate the container file: `sudo bash /tmp/bds-setup/bds-backend/deploy/setup-server.sh`
 3. Click **Build Now** on `bds-backend`.
 
 Use the same two steps whenever you change any setting.
@@ -218,3 +220,89 @@ Use the same two steps whenever you change any setting.
 | Container restarts or is killed | it's capped at 1 GB (`--memory 1g`); check `free -m` and `docker stats` |
 | `apt-get update` fails on the Jenkins repo | the Jenkins apt signing key is missing; refresh it from <https://pkg.jenkins.io/debian-stable/> (`setup-server.sh` works around this) |
 | Encrypted data unreadable after a redeploy | `BDS_DATA_KEY` / `BDS_HASH_KEY` changed; restore the original values from your backup |
+
+## 12. Frontend (bds-frontend)
+
+The React app in `bds-frontend/` is built into its own image (`bds-frontend/Dockerfile`: Node build, then nginx). nginx serves the app and forwards `/api/...` to the `bds-backend` container over `bds-net`, so the browser only talks to one site and the backend port is never exposed.
+
+```
+  Browser ──▶ https://bds.metaversedu.in ──▶ host nginx 443 ──▶ 127.0.0.1:8091 (bds-frontend)
+                                                                   ├─ /        → React app
+                                                                   └─ /api/... → bds-backend:8080 (bds-net)
+```
+
+Prerequisite: the backend (steps 1–7) is running, so `bds-net` and `bds-backend` exist.
+
+### 12.1 Allow the frontend origin in the backend
+
+The backend checks the browser's `Origin` header, so add the frontend domain:
+
+```bash
+sudo sed -i 's#^BDS_ALLOWED_ORIGINS=.*#BDS_ALLOWED_ORIGINS=https://bds.metaversedu.in,http://localhost:5173#' /etc/bds/bds-backend.env
+sudo bash /tmp/bds-setup/bds-backend/deploy/setup-server.sh     # regenerates the container env file
+```
+
+Then click **Build Now** on the `bds-backend` job so the container picks it up.
+
+### 12.2 Jenkins job
+
+1. **New Item** → name `bds-frontend` → **Pipeline** → **OK**.
+2. **Pipeline**: Definition *Pipeline script from SCM*, SCM *Git*, Repository URL `https://github.com/Saic98779/bds-marketplace.git`, Branch `*/main`, **Script Path `bds-frontend/Jenkinsfile`**.
+3. **Save** → **Build Now**.
+
+| Stage | What happens |
+|---|---|
+| Checkout | tags the image `<build number>-<commit>` |
+| Build Image | `docker build bds-frontend`: `npm ci` + `vite build`, copied into nginx |
+| Deploy | replaces the `bds-frontend` container (`127.0.0.1:8091` → `80`, on `bds-net`, 128 MB) |
+| Health Check | `/healthz` and the app's `index.html`; also tries `/api/v1/public/settings` and only **warns** if the backend is down |
+| On failure | restarts the previous image |
+
+Check on the server:
+
+```bash
+docker ps --filter name=bds-frontend
+curl http://127.0.0.1:8091/healthz                         # ok
+curl -s http://127.0.0.1:8091/api/v1/public/settings | head -c 100   # JSON from the backend
+```
+
+### 12.3 Public site with HTTPS
+
+`bds.metaversedu.in` already points to 51.79.165.43. Create `/etc/nginx/sites-available/bds.metaversedu.in`:
+
+```nginx
+server {
+    listen 80;
+    server_name bds.metaversedu.in;
+    client_max_body_size 30M;
+
+    location / {
+        proxy_pass http://127.0.0.1:8091;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+```bash
+sudo ln -s /etc/nginx/sites-available/bds.metaversedu.in /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d bds.metaversedu.in
+```
+
+Open <https://bds.metaversedu.in> and sign in.
+
+### 12.4 Operations and troubleshooting
+
+| Task / symptom | How |
+|---|---|
+| Deploy new frontend code | `git push` to `main`; the `bds-frontend` job builds within 5 minutes |
+| Logs | `docker logs -f bds-frontend` |
+| Pages load but every API call fails (502) | backend down or not on the network: `docker ps --filter name=bds-backend`, `docker network inspect bds-net` |
+| API calls return 403 "Invalid CORS request" | `BDS_ALLOWED_ORIGINS` doesn't include `https://bds.metaversedu.in` ([12.1](#121-allow-the-frontend-origin-in-the-backend)) |
+| Refreshing a page like `/buyer/rfqs` gives 404 | the host nginx site isn't proxying to 8091; check `/etc/nginx/sites-enabled/bds.metaversedu.in` |
+| Upload fails with 413 | raise `client_max_body_size` in the host nginx site |
+| `port is already allocated` on 8091 | `sudo ss -ltnp 'sport = :8091'`; change `HOST_PORT` in `bds-frontend/Jenkinsfile` and the nginx site |
+| Local development | `cd bds-frontend && npm run dev` (proxies to the production API; `VITE_GATEWAY_URL=http://localhost:8080 npm run dev` for a local backend) |

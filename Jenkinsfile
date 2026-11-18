@@ -1,6 +1,6 @@
 // Builds the bds-backend Docker image and (re)deploys the container on the same VM Jenkins runs on.
 // One-time prerequisites on the server (see DEPLOYMENT.md):
-//   - sudo bash deploy/setup-server.sh   (Oracle container on the bds-net network, generated secrets)
+//   - sudo bash bds-backend/deploy/setup-server.sh   (Oracle container on the bds-net network, generated secrets)
 //   - /etc/bds/bds-backend.container.env readable by the jenkins user (DB_URL, DB_PASSWORD, BDS_JWT_SECRET, ...)
 
 def runContainer(String image) {
@@ -42,7 +42,7 @@ pipeline {
         HOST_PORT      = '8090'   // Jenkins uses 8080 and other apps 8081-8084 on this VM
         APP_PORT       = '8080'
         HEALTH_URL     = 'http://localhost:8090/actuator/health'
-        ENV_FILE       = '/etc/bds/bds-backend.container.env'   // written by deploy/setup-server.sh
+        ENV_FILE       = '/etc/bds/bds-backend.container.env'   // written by bds-backend/deploy/setup-server.sh
     }
 
     stages {
@@ -65,7 +65,7 @@ pipeline {
         stage('Deploy') {
             steps {
                 sh '''
-                    [ -r "$ENV_FILE" ] || { echo "Cannot read $ENV_FILE; re-run deploy/setup-server.sh"; exit 1; }
+                    [ -r "$ENV_FILE" ] || { echo "Cannot read $ENV_FILE; re-run bds-backend/deploy/setup-server.sh"; exit 1; }
 
                     # The backend reaches Oracle by container name on a private network
                     docker network inspect ${DOCKER_NETWORK} >/dev/null 2>&1 || docker network create ${DOCKER_NETWORK}
